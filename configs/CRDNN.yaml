@@ -2,8 +2,6 @@
 # Model: VGG2 + LSTM + time pooling
 # Augmentation: TimeDomainSpecAugment
 # Additions: 2D pooling
-# Authors: Titouan Parcollet, Mirco Ravanelli, Peter Plantinga, Ju-Chieh Chou,
-# and Abdel HEBA 2020
 # ################################
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
@@ -187,10 +185,8 @@ modules:
 model: !new:torch.nn.ModuleList
     - [!ref <enc>, !ref <emb>, !ref <dec>, !ref <ctc_lin>, !ref <seq_lin>]
 
-opt_class: !name:torch.optim.Adadelta
+opt_class: !name:torch.optim.SGD
     lr: !ref <lr>
-    rho: 0.95
-    eps: 1.e-8
 
 lr_annealing: !new:speechbrain.nnet.schedulers.NewBobScheduler
     initial_value: !ref <lr>

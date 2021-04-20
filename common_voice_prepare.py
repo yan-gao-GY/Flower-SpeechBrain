@@ -2,10 +2,6 @@
 Data preparation.
 
 Download: https://voice.mozilla.org/en/datasets
-
-Author
-------
-Titouan Parcollet
 """
 
 import os

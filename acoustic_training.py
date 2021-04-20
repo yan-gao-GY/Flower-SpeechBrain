@@ -14,29 +14,20 @@
 # ==============================================================================
 
 
-import os
-import sys
 import torch
-import csv
-import re
-import logging
-import timeit
-import time
 from tqdm.contrib import tqdm
-import torchaudio
 import speechbrain as sb
 from speechbrain.utils.data_utils import undo_padding
 
 import flwr as fl
-from tqdm.contrib import tzip
 import time
-import pickle
 from collections import OrderedDict
 import numpy as np
 from torch.utils.data import DataLoader
 from speechbrain.utils.distributed import run_on_main
 from enum import Enum, auto
 
+# two layer names that do not join aggregation
 K1 = "enc.DNN.block_0.norm.norm.num_batches_tracked"
 K2 = "enc.DNN.block_1.norm.norm.num_batches_tracked"
 
@@ -49,19 +40,6 @@ class Stage(Enum):
 
 def set_weights(weights: fl.common.Weights, modules, evaluate, add_train, device) -> None:
     """Set model weights from a list of NumPy ndarrays."""
-    # if evaluate or add_train:
-    #     state_dict = OrderedDict()
-    #     for k, v in zip(modules.state_dict().keys(), weights):
-    #         if v.shape == ():
-    #             state_dict[k] = torch.tensor(np.array(v))
-    #         else:
-    #             if v.shape[0] != 0:
-    #                 state_dict[k] = torch.Tensor(np.array(v))
-    # else:
-    #     state_dict = OrderedDict(
-    #         {k: torch.Tensor(np.array(v)) for k, v in zip(modules.state_dict().keys(), weights) if k.find('norm') == -1}
-    #     )
-
     state_dict = OrderedDict()
     valid_keys = [k for k in modules.state_dict().keys() if k != K1 and k != K2]
     for k, v in zip(valid_keys, weights):
@@ -69,25 +47,7 @@ def set_weights(weights: fl.common.Weights, modules, evaluate, add_train, device
         v_ = v_.to(device)
         state_dict[k] = v_
 
-        # if v.shape == ():
-        #     print('v.shape == ()', k)
-        #     print(v)
-        #     v_ = torch.tensor(np.array(v))
-        #     v_ = v_.to(device)
-        #     print(v_.device)
-        #     state_dict[k] = v_
-        # else:
-        #     v_ = torch.Tensor(np.array(v))
-        #     v_ = v_.to(device)
-        #     state_dict[k] = v_
-
-
-    # state_dict = OrderedDict(
-    #     {k: torch.Tensor(np.array(v)) for k, v in zip(modules.state_dict().keys(), weights) if k.find('norm') == -1}
-    # )
-
     modules.load_state_dict(state_dict, strict=False)
-    # modules.load_state_dict(state_dict)
 
 def get_weights(modules) -> fl.common.Weights:
     """Get model weights as a list of NumPy ndarrays."""
@@ -95,7 +55,6 @@ def get_weights(modules) -> fl.common.Weights:
     for k, v in modules.state_dict().items():
         if k != K1 and k != K2:
             w.append(v.cpu().numpy())
-    # w = [val.cpu().numpy() for k, val in modules.state_dict().items()]
     return w
 
 # Define training procedure
@@ -399,16 +358,14 @@ class ASR(sb.core.Brain):
         self.init_optimizers()
 
         # Load latest checkpoint to resume training if interrupted
-        # if self.checkpointer is not None:
-        #     self.checkpointer.recover_if_possible(
-        #         device=torch.device(self.device)
-        #     )
+        if self.checkpointer is not None:
+            self.checkpointer.recover_if_possible(
+                device=torch.device(self.device)
+            )
 
     def evaluate(
         self,
         test_set,
-        max_key=None,
-        min_key=None,
         progressbar=None,
         test_loader_kwargs={},
     ):
@@ -445,8 +402,6 @@ class ASR(sb.core.Brain):
                 test_set, sb.Stage.TEST, **test_loader_kwargs
             )
 
-
-        # self.on_evaluate_start(max_key=max_key, min_key=min_key)
         self.on_stage_start(sb.Stage.TEST, epoch=None)
         self.modules.eval()
         avg_test_loss = 0.0
@@ -466,9 +421,6 @@ class ASR(sb.core.Brain):
                     break
 
             # Only run evaluation "on_stage_end" on main process
-            # wer = run_on_main(
-            #     self.on_stage_end, args=[sb.Stage.TEST, avg_test_loss, None]
-            # )
             wer = self.on_stage_end(sb.Stage.TEST, avg_test_loss, None)
         self.step = 0
 

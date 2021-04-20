@@ -15,82 +15,48 @@
 
 
 import torchaudio
-import csv
 import logging
-import os
-import re
-import sys
 from argparse import ArgumentParser
-from typing import Dict
 import timeit
 import flwr as fl
-import numpy as np
 from hyperpyyaml import load_hyperpyyaml
 import speechbrain as sb
 from speechbrain.utils.distributed import run_on_main
 from speechbrain.tokenizers.SentencePiece import SentencePiece
 import torch
-from torch.utils.data import DataLoader
 from collections import OrderedDict
-torch.set_num_threads(10)
+torch.set_num_threads(8)
 
 from acoustic_training import (
     ASR,
     set_weights,
-    get_weights,
-    Stage
+    get_weights
 )
 from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, ParametersRes, Weights
 
 
-pars = ArgumentParser(description="FlowerSpeechBrain")
-pars.add_argument(
+parser = ArgumentParser(description="FlowerSpeechBrain")
+parser.add_argument(
     "--log_host", type=str, help="HTTP log handler host (no default)",
 )
-pars.add_argument("--cid", type=str, help="Client CID (no default)")
-pars.add_argument("--delay_factor", type=float, default=0.0, help="Client delay factor (no default)")
-pars.add_argument("--data_path", type=str, help="dataset path")
-args = pars.parse_args()
+parser.add_argument("--cid", type=str, help="Client CID (no default)")
+parser.add_argument("--delay_factor", type=float, default=0.0, help="Client delay factor")
+parser.add_argument("--data_path", type=str, help="dataset path")
+parser.add_argument('--server_address', type=str, default="[::]:8080", help='server IP:PORT')
+parser.add_argument("--tr_path", type=str, help="train set path")
+parser.add_argument('--dev_path', type=str, help='dev set path')
+parser.add_argument('--save_path_pre', type=str, default="./results", help='path for output files')
+parser.add_argument('--pre_train_model_path', type=str, help='path for pre-trained model')
+parser.add_argument('--tokenizer_path', type=str, help='path for tokenizer (generated from the data for pre-trained model)')
+parser.add_argument('--config_path', type=str, default="./configs/", help='path to config directory')
+parser.add_argument('--config_file', type=str, default="CRDNN.yaml", help='config file name')
+parser.add_argument('--eval_device', type=str, default="cuda:1", help='device for evaluation')
+args = parser.parse_args()
 
-Test = False
-#Test = True
-
-Cluster = "canada" # [ox, cam, canada]
-
-if Cluster == "cam":
-    DEFAULT_SERVER_ADDRESS = "10.43.6.43:9000"
-    # Data_Path = '/home/yg381/rds/hpc-work/datasets/commonvoice/fr/cv-corpus-6.0-2020-12-11/fr'
-    Data_Path = '/local/cv-corpus-6.0-2020-12-11/fr'
-    SAVE_PATH_PRE = '/home/yg381/rds/hpc-work/results/fr_train_10clients_wer/'
-    Flower_Path = "/home/yg381/flower_speechbrain_updating/wer_based"
-    Pre_train_model_path = "/home/yg381/rds/hpc-work/pre-trained_fl/model.ckpt"
-    Tokenizer_Path = "/rds/user/yg381/hpc-work/results/CRDNN_fr_pre_wholeToken/1234/save/train.csv"
-elif Cluster == "ox":
-    # DEFAULT_SERVER_ADDRESS = "163.1.88.76:9000" # tarawera
-    DEFAULT_SERVER_ADDRESS = "163.1.88.101:9000" # ngongotaha
-    # DEFAULT_SERVER_ADDRESS = "163.1.88.85:9000"  # mauao
-    Data_Path = '/datasets/commonvoice/fr/cv-corpus-6.0-2020-12-11/fr'
-    SAVE_PATH_PRE = 'results/fr_train_10clients/'
-    Flower_Path = "/nfs-share/yan/flower_speechbrain_updating/wer_based"
-    Pre_train_model_path = "/nfs-share/yan/flower_speechbrain_updating/speechbrain/recipes/CommonVoice/ASR/seq2seq/train/results/CRDNN_it/1234/save/CKPT+2021-02-03+10-46-24+00/model.ckpt"
-    Tokenizer_Path = "/nfs-share/yan/train_csv/CRDNN_fr_pre/train.csv"
-else:
-    DEFAULT_SERVER_ADDRESS = "10.70.15.5:9000"
-    Data_Path = args.data_path
-    SAVE_PATH_PRE = 'results/fr_train_10clients/'
-    Flower_Path = '/home/parcollt/scratch/yan/flower_speechbrain_updating/wer_based_valid'
-    Pre_train_model_path = '/home/parcollt/scratch/yan/pre-trained_fl/model.ckpt'
-    Tokenizer_Path = "/home/parcollt/scratch/yan/train_csv/CRDNN_fr_pre/train.csv"
-
-
-TR_PATH_PRE = '/split_10_clients/'
-Dev_path = Data_Path + "/train_temp.tsv" if Test else Data_Path + "/dev.tsv"
-Config_Path = "/configs/CRDNN.yaml"
-Num_gpu_evaluate = 4
-Eval_device = 'cuda:1'
-
+# two layer names that do not join aggregation
 K1 = "enc.DNN.block_0.norm.norm.num_batches_tracked"
 K2 = "enc.DNN.block_1.norm.norm.num_batches_tracked"
+
 
 class SpeechBrainClient(fl.client.Client):
     def __init__(self,
@@ -213,7 +179,7 @@ class SpeechBrainClient(fl.client.Client):
 
         if global_rounds == 1 and not add_train and not evaluate:
             print("loading pre-trained model...")
-            state_dict = torch.load(Pre_train_model_path)
+            state_dict = torch.load(args.pre_train_model_path)
             self.params.model.load_state_dict(state_dict)
 
             # if self.asr_brain.checkpointer is not None:
@@ -397,12 +363,8 @@ def int_model(
     evaluate=False,
     add_train=False):
 
-    # This hack needed to import data preparation script from ..
-    # current_dir = os.path.dirname(os.path.abspath(__file__))
-    # sys.path.append(os.path.dirname(current_dir))
-
     # Load hyperparameters file with command-line overrides
-    params_file = flower_path + Config_Path
+    params_file = flower_path + args.config_file
 
     # Override with FLOWER PARAMS
     if evaluate:
@@ -410,7 +372,7 @@ def int_model(
             "output_folder": save_path,
             "number_of_epochs": 1,
             "test_batch_size": 16,
-            "device": Eval_device,
+            "device": args.eval_device,
             # "device": 'cpu'
         }
     elif add_train:
@@ -423,18 +385,6 @@ def int_model(
         overrides = {
             "output_folder": save_path
         }
-
-    # if evaluate or add_train:
-    #     run_opts = {'debug': False,
-    #                 'debug_batches': 2,
-    #                 'debug_epochs': 2,
-    #                 'device': 'cuda:0',
-    #                 'data_parallel_count': Num_gpu_evaluate,
-    #                 'data_parallel_backend': True,
-    #                 'distributed_launch': False,
-    #                 'distributed_backend': 'nccl'}
-    # else:
-    #     run_opts = None
     run_opts = None
 
     with open(params_file) as fin:
@@ -448,7 +398,7 @@ def int_model(
     params["train_csv"] = params["save_folder"] + "/train.csv"
     params["valid_csv"] = params["save_folder"] + "/dev.csv"
     params["test_csv"] = params["save_folder"] + "/test.csv"
-    params["tokenizer_csv"] = Tokenizer_Path
+    params["tokenizer_csv"] = args.tokenizer_path
 
     # Dataset preparation (parsing CommonVoice)
     from common_voice_prepare import prepare_common_voice  # noqa
@@ -497,20 +447,19 @@ def main() -> None:
     fl.common.logger.configure(f"client_{args.cid}", host=args.log_host)
 
     # initialise path
-    tr_path = Data_Path + "/train_temp.tsv" if Test else Data_Path + TR_PATH_PRE + "train_" + str(args.cid) + ".tsv"
-    #tr_path = Data_Path + "/train.tsv"
-    test_path = Dev_path  # We only evaluate on small dataset on clients
-    dev_path = Dev_path  # We only evaluate on small dataset on clients
-    save_path = SAVE_PATH_PRE + "client_" + str(args.cid)
+    tr_path = args.tr_path + "train_" + str(args.cid) + ".tsv"
+    test_path = args.dev_path
+    dev_path = args.dev_path
+    save_path = args.save_path_pre + "client_" + str(args.cid)
 
     # int model
-    asr_brain, dataset = int_model(Flower_Path, tr_path, dev_path, test_path, save_path, Data_Path)
+    asr_brain, dataset = int_model(args.config_path, tr_path, dev_path, test_path, save_path, args.data_path)
 
     # Start client
     client = SpeechBrainClient(args.cid, args.delay_factor, asr_brain, dataset)
 
     #client.fit( (client.get_parameters().parameters, config))
-    fl.client.start_client(DEFAULT_SERVER_ADDRESS, client, grpc_max_message_length=1024*1024*1024)
+    fl.client.start_client(args.server_address, client, grpc_max_message_length=1024*1024*1024)
 
 
 if __name__ == "__main__":
