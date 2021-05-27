@@ -35,41 +35,20 @@ from acoustic_training import (
 from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, ParametersRes, Weights
 
 
-parser = ArgumentParser(description="FlowerSpeechBrain")
-parser.add_argument(
-    "--log_host", type=str, help="HTTP log handler host (no default)",
-)
-parser.add_argument("--cid", type=str, help="Client CID (no default)")
-parser.add_argument("--delay_factor", type=float, default=0.0, help="Client delay factor")
-parser.add_argument("--data_path", type=str, help="dataset path")
-parser.add_argument('--server_address', type=str, default="[::]:8080", help='server IP:PORT')
-parser.add_argument("--tr_path", type=str, help="train set path")
-parser.add_argument('--dev_path', type=str, help='dev set path')
-parser.add_argument('--save_path_pre', type=str, default="./results", help='path for output files')
-parser.add_argument('--pre_train_model_path', type=str, help='path for pre-trained model')
-parser.add_argument('--tokenizer_path', type=str, help='path for tokenizer (generated from the data for pre-trained model)')
-parser.add_argument('--config_path', type=str, default="./configs/", help='path to config directory')
-parser.add_argument('--config_file', type=str, default="CRDNN.yaml", help='config file name')
-parser.add_argument('--eval_device', type=str, default="cuda:1", help='device for evaluation')
-args = parser.parse_args()
-
-# two layer names that do not join aggregation
-K1 = "enc.DNN.block_0.norm.norm.num_batches_tracked"
-K2 = "enc.DNN.block_1.norm.norm.num_batches_tracked"
-
-
 class SpeechBrainClient(fl.client.Client):
     def __init__(self,
         cid: int,
         delay_factor: float,
         asr_brain,
-        dataset):
+        dataset,
+        pre_train_model_path=None):
 
         self.cid = cid
         self.params = asr_brain.hparams
         self.modules = asr_brain.modules
         self.asr_brain = asr_brain
         self.dataset = dataset
+        self.pre_train_model_path = pre_train_model_path
 
         # self.new_weights = [ nda for nda in np.load(
         #     self.data_path + "/flower/pretrained_model.npy", allow_pickle=True
@@ -178,9 +157,10 @@ class SpeechBrainClient(fl.client.Client):
             set_weights(server_params, self.modules, evaluate, add_train, self.params.device)
 
         if global_rounds == 1 and not add_train and not evaluate:
-            print("loading pre-trained model...")
-            state_dict = torch.load(args.pre_train_model_path)
-            self.params.model.load_state_dict(state_dict)
+            if self.pre_train_model_path is not None:
+                print("loading pre-trained model...")
+                state_dict = torch.load(self.pre_train_model_path)
+                self.params.model.load_state_dict(state_dict)
 
             # if self.asr_brain.checkpointer is not None:
             #     print("loading pre-trained model from checkpoint...")
@@ -189,9 +169,13 @@ class SpeechBrainClient(fl.client.Client):
             #     )
 
         if global_rounds != 1:
+            # two layer names that do not join aggregation
+            k1 = "enc.DNN.block_0.norm.norm.num_batches_tracked"
+            k2 = "enc.DNN.block_1.norm.norm.num_batches_tracked"
+
             state_dict_norm = OrderedDict()
-            state_dict_norm[K1] = torch.tensor(1, device=self.params.device)
-            state_dict_norm[K2] = torch.tensor(0, device=self.params.device)
+            state_dict_norm[k1] = torch.tensor(1, device=self.params.device)
+            state_dict_norm[k2] = torch.tensor(0, device=self.params.device)
             self.modules.load_state_dict(state_dict_norm, strict=False)
 
         # Load best checkpoint for evaluation
@@ -202,27 +186,10 @@ class SpeechBrainClient(fl.client.Client):
                 min_key="WER",
                 test_loader_kwargs=self.params.test_dataloader_options,
             )
-
-            # if not isinstance(test_data, DataLoader):
-            #     self.params.test_dataloader_options["ckpt_prefix"] = None
-            #     test_set = self.asr_brain.make_dataloader(
-            #         test_data, Stage.TEST, **self.params.test_dataloader_options
-            #     )
-
             return batch_count, loss, wer
 
         # Training
         fit_begin = timeit.default_timer()
-        # if add_train:
-        #     count_sample = self.asr_brain.fit(
-        #         self.params.epoch_counter,
-        #         train_data,
-        #         valid_data,
-        #         train_loader_kwargs=self.params.dataloader_options,
-        #         valid_loader_kwargs=self.params.test_dataloader_options,
-        #     )
-        # else:
-        #     count_sample = 95
 
         count_sample, avg_loss, avg_wer = self.asr_brain.fit(
             self.params.epoch_counter,
@@ -231,8 +198,6 @@ class SpeechBrainClient(fl.client.Client):
             train_loader_kwargs=self.params.dataloader_options,
             valid_loader_kwargs=self.params.test_dataloader_options,
         )
-        # count_sample = 95
-
 
         # retrieve the parameters to return
         params_list = get_weights(self.modules)
@@ -360,11 +325,14 @@ def int_model(
     test_path,
     save_path,
     data_path,
+    config_file,
+    tokenizer_path=None,
+    eval_device="cpu",
     evaluate=False,
     add_train=False):
 
     # Load hyperparameters file with command-line overrides
-    params_file = flower_path + args.config_file
+    params_file = flower_path + config_file
 
     # Override with FLOWER PARAMS
     if evaluate:
@@ -372,7 +340,7 @@ def int_model(
             "output_folder": save_path,
             "number_of_epochs": 1,
             "test_batch_size": 16,
-            "device": args.eval_device,
+            "device": eval_device,
             # "device": 'cpu'
         }
     elif add_train:
@@ -398,7 +366,7 @@ def int_model(
     params["train_csv"] = params["save_folder"] + "/train.csv"
     params["valid_csv"] = params["save_folder"] + "/dev.csv"
     params["test_csv"] = params["save_folder"] + "/test.csv"
-    params["tokenizer_csv"] = args.tokenizer_path
+    params["tokenizer_csv"] = tokenizer_path if tokenizer_path is not None else params["train_csv"]
 
     # Dataset preparation (parsing CommonVoice)
     from common_voice_prepare import prepare_common_voice  # noqa
@@ -443,6 +411,25 @@ def int_model(
 
 
 def main() -> None:
+    parser = ArgumentParser(description="FlowerSpeechBrain")
+    parser.add_argument(
+        "--log_host", type=str, help="HTTP log handler host (no default)",
+    )
+    parser.add_argument("--cid", type=str, help="Client CID (no default)")
+    parser.add_argument("--delay_factor", type=float, default=0.0, help="Client delay factor")
+    parser.add_argument("--data_path", type=str, help="dataset path")
+    parser.add_argument('--server_address', type=str, default="[::]:8080", help='server IP:PORT')
+    parser.add_argument("--tr_path", type=str, help="train set path")
+    parser.add_argument('--dev_path', type=str, help='dev set path')
+    parser.add_argument('--save_path_pre', type=str, default="./results", help='path for output files')
+    parser.add_argument('--pre_train_model_path', type=str, default=None, help='path for pre-trained model')
+    parser.add_argument('--tokenizer_path', type=str, default=None,
+                        help='path for tokenizer (generated from the data for pre-trained model)')
+    parser.add_argument('--config_path', type=str, default="./configs/", help='path to config directory')
+    parser.add_argument('--config_file', type=str, default="CRDNN.yaml", help='config file name')
+    parser.add_argument('--eval_device', type=str, default="cpu", help='device for evaluation')
+    args = parser.parse_args()
+
     # Configure logger
     fl.common.logger.configure(f"client_{args.cid}", host=args.log_host)
 
@@ -453,10 +440,11 @@ def main() -> None:
     save_path = args.save_path_pre + "client_" + str(args.cid)
 
     # int model
-    asr_brain, dataset = int_model(args.config_path, tr_path, dev_path, test_path, save_path, args.data_path)
+    asr_brain, dataset = int_model(args.config_path, tr_path, dev_path, test_path, save_path, args.data_path,
+                                   args.config_file, args.tokenizer_path, args.eval_device)
 
     # Start client
-    client = SpeechBrainClient(args.cid, args.delay_factor, asr_brain, dataset)
+    client = SpeechBrainClient(args.cid, args.delay_factor, asr_brain, dataset, args.pre_train_model_path)
 
     #client.fit( (client.get_parameters().parameters, config))
     fl.client.start_client(args.server_address, client, grpc_max_message_length=1024*1024*1024)
