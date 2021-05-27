@@ -62,22 +62,22 @@ n_mels: 80
 # Model parameters
 activation: !name:torch.nn.LeakyReLU
 dropout: 0.15
-cnn_blocks: 2
+cnn_blocks: 1
 cnn_channels: (128, 200, 256)
 inter_layer_pooling_size: (2, 2, 2)
 cnn_kernelsize: (3, 3)
 time_pooling_size: 4
 rnn_class: !name:speechbrain.nnet.RNN.LSTM
-rnn_layers: 5
-rnn_neurons: 1024
+rnn_layers: 4
+rnn_neurons: 512
 rnn_bidirectional: True
 dnn_blocks: 2
-dnn_neurons: 1024
+dnn_neurons: 512
 emb_size: 128
-dec_neurons: 1024
+dec_neurons: 512
 
 # Outputs
-output_neurons: 500  # BPE size, index(blank/eos/bos) = 0
+output_neurons: 250  # BPE size, index(blank/eos/bos) = 0
 
 # Decoding parameters
 # Be sure that the bos and eos index match with the BPEs ones
@@ -148,8 +148,8 @@ dec: !new:speechbrain.nnet.RNN.AttentionalRNNDecoder
     input_size: !ref <emb_size>
     rnn_type: gru
     attn_type: location
-    hidden_size: 1024
-    attn_dim: 1024
+    hidden_size: 512
+    attn_dim: 512
     num_layers: 1
     scaling: 1.0
     channels: 10
