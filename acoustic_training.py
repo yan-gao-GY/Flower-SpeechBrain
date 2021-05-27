@@ -123,7 +123,7 @@ class ASR(sb.core.Brain):
         self.on_fit_start()
 
         if progressbar is None:
-            progressbar = self.progressbar
+            progressbar = not self.noprogressbar
 
         batch_count = 0
         # Iterate epochs
