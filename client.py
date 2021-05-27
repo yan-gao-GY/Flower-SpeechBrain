@@ -100,6 +100,8 @@ class SpeechBrainClient(fl.client.Client):
 
         metrics = {"train_loss": avg_loss, "wer": avg_wer}
 
+        torch.cuda.empty_cache()
+
         return FitRes(
             parameters=self.get_parameters().parameters,
             num_examples=num_examples,

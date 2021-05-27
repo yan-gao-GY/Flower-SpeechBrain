@@ -104,6 +104,7 @@ class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
                 delay_factor=0,
                 add_train=True
             )
+            torch.cuda.empty_cache()
             return weights_after_server_side_training, {}
 
 
@@ -185,7 +186,7 @@ def evaluate(weights: fl.common.Weights):
         evaluate=True,
         delay_factor=0
     )
-
+    torch.cuda.empty_cache()
     return lss, {"accuracy": acc}
 
 def get_on_fit_config_fn(
