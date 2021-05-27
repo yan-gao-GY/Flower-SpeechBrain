@@ -377,10 +377,6 @@ class ASR(sb.core.Brain):
         test_set : Dataset, DataLoader
             If a DataLoader is given, it is iterated directly. Otherwise passed
             to self.make_dataloader()
-        max_key : str
-            Key to use for finding best checkpoint, passed to on_evaluate_start
-        min_key : str
-            Key to use for finding best checkpoint, passed to on_evaluate_start
         progressbar : bool
             Whether to display the progress in a progressbar.
         test_loader_kwargs : dict
@@ -391,10 +387,10 @@ class ASR(sb.core.Brain):
 
         Returns
         -------
-        average test loss
+        batch count, average test loss, WER
         """
         if progressbar is None:
-            progressbar = self.progressbar
+            progressbar = not self.noprogressbar
 
         if not isinstance(test_set, DataLoader):
             test_loader_kwargs["ckpt_prefix"] = None
@@ -425,7 +421,3 @@ class ASR(sb.core.Brain):
         self.step = 0
 
         return batch_count, avg_test_loss, wer
-
-
-
-
