@@ -183,7 +183,7 @@ class SpeechBrainClient(fl.client.Client):
             self.params.wer_file = self.params.output_folder + "/wer_test.txt"
             batch_count, loss, wer = self.asr_brain.evaluate(
                 test_data,
-                min_key="WER",
+                # min_key="WER",
                 test_loader_kwargs=self.params.test_dataloader_options,
             )
             return batch_count, loss, wer
