@@ -24,7 +24,7 @@ from functools import reduce
 
 from client import SpeechBrainClient, int_model
 from flwr.server.strategy.aggregate import aggregate as aggregate_num
-from flwr.common import parameters_to_weights, Weights
+from flwr.common import parameters_to_weights, Weights, weights_to_parameters
 
 
 parser = ArgumentParser(description="FlowerSpeechBrain")
@@ -105,7 +105,7 @@ class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
                 add_train=True
             )
             torch.cuda.empty_cache()
-            return weights_after_server_side_training, {}
+            return weights_to_parameters(weights_after_server_side_training), {}
 
 
 def aggregate(results: List[Tuple[Weights, int]], key_name) -> Weights:
