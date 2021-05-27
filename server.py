@@ -163,7 +163,7 @@ def main() -> None:
         args.server_address, server, config={"num_rounds": args.rounds}, grpc_max_message_length=1024*1024*1024
     )
 
-def evaluate(weights: fl.common.Weights) -> Optional[Tuple[float, float]]:
+def evaluate(weights: fl.common.Weights):
     """Use entire test set for evaluation."""
     data_path = args.data_path
     flower_path = args.config_path
@@ -186,7 +186,7 @@ def evaluate(weights: fl.common.Weights) -> Optional[Tuple[float, float]]:
         delay_factor=0
     )
 
-    return lss, acc
+    return lss, {"accuracy": acc}
 
 def get_on_fit_config_fn(
     lr_initial: float, timeout: int
