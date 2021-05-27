@@ -104,7 +104,7 @@ class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
                 delay_factor=0,
                 add_train=True
             )
-            return weights_after_server_side_training
+            return weights_after_server_side_training, {}
 
 
 def aggregate(results: List[Tuple[Weights, int]], key_name) -> Weights:
