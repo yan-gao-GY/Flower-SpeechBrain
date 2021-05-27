@@ -31,8 +31,8 @@ device: cuda:0
 avoid_if_longer_than: 8.0
 
 # Training parameters
-number_of_epochs: 5
-number_of_ctc_epochs: 4
+number_of_epochs: 3
+number_of_ctc_epochs: 2
 lr: 1.0
 ctc_weight: 0.3
 sorting: ascending
