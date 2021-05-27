@@ -332,7 +332,7 @@ def int_model(
     data_path,
     config_file="CRDNN.yaml",
     tokenizer_path=None,
-    eval_device="cpu",
+    eval_device="cuda:0",
     evaluate=False,
     add_train=False):
 
@@ -432,7 +432,7 @@ def main() -> None:
                         help='path for tokenizer (generated from the data for pre-trained model)')
     parser.add_argument('--config_path', type=str, default="./configs/", help='path to config directory')
     parser.add_argument('--config_file', type=str, default="CRDNN.yaml", help='config file name')
-    parser.add_argument('--eval_device', type=str, default="cuda:1", help='device for evaluation')
+    parser.add_argument('--eval_device', type=str, default="cuda:0", help='device for evaluation')
     args = parser.parse_args()
 
     # Configure logger

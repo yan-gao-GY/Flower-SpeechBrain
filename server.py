@@ -44,6 +44,9 @@ parser.add_argument("--rounds", type=int, default=30, help="global training roun
 parser.add_argument("--local_epochs", type=int, default=5, help="local epochs on each client")
 parser.add_argument("--local_batch_size", type=int, default=8, help="local batch size on each client")
 parser.add_argument("--weight_strategy", type=str, default="num", help="strategy of weighting clients in [num, loss, wer]")
+parser.add_argument('--config_file', type=str, default="CRDNN.yaml", help='config file name')
+parser.add_argument('--tokenizer_path', type=str, default=None,
+                        help='path for tokenizer (generated from the data for pre-trained model)')
 args = parser.parse_args()
 
 
@@ -89,7 +92,8 @@ class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
         if weights is not None:
             print(f"Train model after aggregation")
             save_path = args.save_path + "add_train_9999"
-            asr_brain, dataset = int_model(args.config_path, args.tr_add_path, args.tr_path, args.tr_path, save_path, args.data_path, add_train=True)
+            asr_brain, dataset = int_model(args.config_path, args.tr_add_path, args.tr_path, args.tr_path, save_path,
+                                           args.data_path, args.config_file, args.tokenizer_path, add_train=True)
             client = SpeechBrainClient(9999, 0.0, asr_brain, dataset)
 
             weights_after_server_side_training = client.train_speech_recogniser(
@@ -169,7 +173,7 @@ def evaluate(weights: fl.common.Weights) -> Optional[Tuple[float, float]]:
     save_path = args.save_path + "evaluation_19999"
 
     # int model
-    asr_brain, dataset = int_model(flower_path, tr_path, dev_path, test_path, save_path, data_path, evaluate=True)
+    asr_brain, dataset = int_model(flower_path, tr_path, dev_path, test_path, save_path, data_path, args.config_file, args.tokenizer_path, evaluate=True)
 
     client = SpeechBrainClient(19999, 0.0, asr_brain, dataset)
 
