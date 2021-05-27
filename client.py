@@ -223,7 +223,9 @@ class SpeechBrainClient(fl.client.Client):
         )
 
 # Define custom data procedure
-def data_io_prepare(hparams):
+def dataio_prepare(hparams):
+    """This function prepares the datasets to be used in the brain class.
+    It also defines the data processing pipeline through user-defined functions."""
 
     # 1. Define datasets
     data_folder = hparams["data_folder"]
@@ -267,7 +269,8 @@ def data_io_prepare(hparams):
     test_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
         csv_path=hparams["test_csv"], replacements={"data_root": data_folder},
     )
-    # We also sort the test data so it is faster to validate
+
+    # We also sort the validation data so it is faster to validate
     test_data = test_data.filtered_sorted(sort_key="duration")
 
     datasets = [train_data, valid_data, test_data]
@@ -276,8 +279,8 @@ def data_io_prepare(hparams):
     tokenizer = SentencePiece(
         model_dir=hparams["save_folder"],
         vocab_size=hparams["output_neurons"],
-        csv_train=hparams["tokenizer_csv"],
-        csv_read="wrd",
+        annotation_train=hparams["tokenizer_csv"],
+        annotation_read="wrd",
         model_type=hparams["token_type"],
         character_coverage=hparams["character_coverage"],
     )
@@ -288,6 +291,8 @@ def data_io_prepare(hparams):
     def audio_pipeline(wav):
         info = torchaudio.info(wav)
         sig = sb.dataio.dataio.read_audio(wav)
+        if info.num_channels > 1:
+            sig = torch.mean(sig, dim=1)
         resampled = torchaudio.transforms.Resample(
             info.sample_rate, hparams["sample_rate"],
         )(sig)
@@ -393,7 +398,7 @@ def int_model(
     )
 
     # Create the datasets objects as well as tokenization and encoding :-D
-    train_data, valid_data, test_data, tokenizer = data_io_prepare(params)
+    train_data, valid_data, test_data, tokenizer = dataio_prepare(params)
 
     # Trainer initialization
     asr_brain = ASR(
@@ -421,7 +426,7 @@ def main() -> None:
     parser.add_argument('--server_address', type=str, default="[::]:8080", help='server IP:PORT')
     parser.add_argument("--tr_path", type=str, help="train set path")
     parser.add_argument('--dev_path', type=str, help='dev set path')
-    parser.add_argument('--save_path_pre', type=str, default="./results", help='path for output files')
+    parser.add_argument('--save_path_pre', type=str, default="./results/", help='path for output files')
     parser.add_argument('--pre_train_model_path', type=str, default=None, help='path for pre-trained model')
     parser.add_argument('--tokenizer_path', type=str, default=None,
                         help='path for tokenizer (generated from the data for pre-trained model)')
