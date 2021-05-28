@@ -114,22 +114,24 @@ class SpeechBrainClient(fl.client.Client):
         print(f"Client {self.cid}: evaluate")
 
         weights = fl.common.parameters_to_weights(ins.parameters)
-        config = ins.config
 
-        epochs = int(config["epochs"])
-        batch_size = int(config["batch_size"])
+        # config = ins.config
+        # epochs = int(config["epochs"])
+        # batch_size = int(config["batch_size"])
 
-        num_examples, loss, cer = self.train_speech_recogniser(
+        num_examples, loss, wer = self.train_speech_recogniser(
             server_params=weights,
-            epochs=epochs,
-            batch_size=batch_size,
+            epochs=1,
+            batch_size=8,
             timeout=100000,
             evaluate=True,
+            delay_factor=0
         )
+        torch.cuda.empty_cache()
 
         # Return the number of evaluation examples and the evaluation result (loss)
         return EvaluateRes(
-            num_examples=num_examples, loss=float(loss), accuracy=float(cer)
+            num_examples=num_examples, loss=float(loss), accuracy=float(wer)
         )
 
     def train_speech_recogniser(
@@ -145,12 +147,8 @@ class SpeechBrainClient(fl.client.Client):
     ):
 
         # print('Global Rounds:', global_rounds)
-        # self.params.batch_size = batch_size
         self.params.epoch_counter.limit = epochs
         self.params.epoch_counter.current = 0
-
-        # if self.cid == 0:
-        #     self.params.device = "cuda:0"
 
         train_data, valid_data, test_data = self.dataset
 
