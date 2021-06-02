@@ -74,7 +74,6 @@ class SpeechBrainClient(fl.client.Client):
         global_rounds = int(config["epoch_global"])
         print("Current global round: ", global_rounds)
         epochs = int(config["epochs"])
-        batch_size = int(config["batch_size"])
 
         (
             new_weights,
