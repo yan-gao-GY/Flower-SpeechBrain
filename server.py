@@ -23,7 +23,7 @@ import numpy as np
 from functools import reduce
 
 from client import SpeechBrainClient, int_model
-from flwr.server.strategy.aggregate import aggregate as aggregate_num
+from flwr.server.strategy.aggregate import aggregate
 from flwr.common import parameters_to_weights, Weights, weights_to_parameters
 
 
@@ -42,7 +42,6 @@ parser.add_argument("--min_fit_clients", type=int, default=10, help="minimum fit
 parser.add_argument("--min_available_clients", type=int, default=10, help="minmum available clients")
 parser.add_argument("--rounds", type=int, default=30, help="global training rounds")
 parser.add_argument("--local_epochs", type=int, default=5, help="local epochs on each client")
-parser.add_argument("--local_batch_size", type=int, default=8, help="local batch size on each client")
 parser.add_argument("--weight_strategy", type=str, default="num", help="strategy of weighting clients in [num, loss, wer]")
 parser.add_argument('--config_file', type=str, default="CRDNN.yaml", help='config file name')
 parser.add_argument('--tokenizer_path', type=str, default=None,
@@ -80,13 +79,13 @@ class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
                 (parameters_to_weights(fit_res.parameters), fit_res.num_examples)
                 for client, fit_res in results
             ]
-            weights =  aggregate_num(weights_results)
+            weights =  aggregate(weights_results)
         elif args.weight_strategy == 'loss' or args.weight_strategy == 'wer':
             weights_results = [
                 (parameters_to_weights(fit_res.parameters), fit_res.metrics[key_name])
                 for client, fit_res in results
             ]
-            weights = aggregate(weights_results, key_name)
+            weights = aggregate(weights_results)
 
         # Train model after aggregation
         if weights is not None:
@@ -94,63 +93,27 @@ class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
             save_path = args.save_path + "add_train_9999"
             asr_brain, dataset = int_model(args.config_path, args.tr_add_path, args.tr_path, args.tr_path, save_path,
                                            args.data_path, args.config_file, args.tokenizer_path, add_train=True)
-            client = SpeechBrainClient(9999, 0.0, asr_brain, dataset)
+            client = SpeechBrainClient(9999, asr_brain, dataset)
 
             weights_after_server_side_training = client.train_speech_recogniser(
                 server_params=weights,
                 epochs=1,
-                batch_size=8,
-                timeout=100000,
-                delay_factor=0,
                 add_train=True
             )
             torch.cuda.empty_cache()
             return weights_to_parameters(weights_after_server_side_training), {}
 
 
-def aggregate(results: List[Tuple[Weights, int]], key_name) -> Weights:
-    """Compute weighted average."""
-    measure_list = []
-    weights_list = []
-    for weights, measure in results:
-        if key_name == 'wer':
-            if measure > 100:
-                measure = 100
-            measure = 100 - measure
-            print('measure', measure)
-
-        elif key_name == 'loss':
-            measure = - measure
-
-        measure_list.append(measure)
-        weights_list.append(weights)
-
-    measure_list = np.array(measure_list)
-    measure_list = torch.from_numpy(measure_list)
-    apply_softmax = torch.nn.Softmax(dim=0)
-    measure_list = apply_softmax(measure_list)
-    measure_list = measure_list.numpy()
-    print('measure_list', measure_list)
-
-    weighted_weights = [[layer * measure for layer in weights] for weights, measure in zip(weights_list, measure_list)]
-    weights_prime = [
-        reduce(np.add, layer_updates) for layer_updates in zip(*weighted_weights)
-    ]
-    return weights_prime
-
-
 def main() -> None:
     # Create ClientManager & Strategy
     client_manager = fl.server.SimpleClientManager()
-
-    timeout = 200
 
     strategy = TrainAfterAggregateStrategy(
         fraction_fit=1,
         min_fit_clients=args.min_fit_clients,
         min_available_clients=args.min_available_clients,
         eval_fn=evaluate,
-        on_fit_config_fn=get_on_fit_config_fn(0.01, timeout)
+        on_fit_config_fn=get_on_fit_config_fn()
     )
 
 
@@ -176,31 +139,24 @@ def evaluate(weights: fl.common.Weights):
     # int model
     asr_brain, dataset = int_model(flower_path, tr_path, dev_path, test_path, save_path, data_path, args.config_file, args.tokenizer_path, evaluate=True)
 
-    client = SpeechBrainClient(19999, 0.0, asr_brain, dataset)
+    client = SpeechBrainClient(19999, asr_brain, dataset)
 
     nb_ex, lss, acc = client.train_speech_recogniser(
         server_params=weights,
         epochs=1,
-        batch_size=8,
-        timeout=100000,
-        evaluate=True,
-        delay_factor=0
+        evaluate=True
     )
     torch.cuda.empty_cache()
     return lss, {"accuracy": acc}
 
-def get_on_fit_config_fn(
-    lr_initial: float, timeout: int
-) -> Callable[[int], Dict[str, str]]:
+def get_on_fit_config_fn() -> Callable[[int], Dict[str, str]]:
     """Return a function which returns training configurations."""
 
     def fit_config(rnd: int) -> Dict[str, str]:
         """Return a configuration with static batch size and (local) epochs."""
         config = {
             "epoch_global": str(rnd),
-            "epochs": str(args.local_epochs),
-            "batch_size": str(args.local_batch_size),
-            "timeout": str(timeout),
+            "epochs": str(args.local_epochs)
         }
         return config
 

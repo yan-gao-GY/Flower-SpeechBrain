@@ -25,6 +25,7 @@ from speechbrain.utils.distributed import run_on_main
 from speechbrain.tokenizers.SentencePiece import SentencePiece
 import torch
 from collections import OrderedDict
+from math import exp
 torch.set_num_threads(8)
 
 from acoustic_training import (
@@ -38,7 +39,6 @@ from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, ParametersRes,
 class SpeechBrainClient(fl.client.Client):
     def __init__(self,
         cid: int,
-        delay_factor: float,
         asr_brain,
         dataset,
         pre_train_model_path=None):
@@ -53,8 +53,7 @@ class SpeechBrainClient(fl.client.Client):
         # self.new_weights = [ nda for nda in np.load(
         #     self.data_path + "/flower/pretrained_model.npy", allow_pickle=True
         # )]
-        self.delay_factor = delay_factor
-        fl.common.logger.log(logging.DEBUG, "Starting client %s with delay factor of %s", cid, delay_factor)
+        fl.common.logger.log(logging.DEBUG, "Starting client %s", cid)
 
 
     def get_parameters(self) -> ParametersRes:
@@ -76,7 +75,6 @@ class SpeechBrainClient(fl.client.Client):
         print("Current global round: ", global_rounds)
         epochs = int(config["epochs"])
         batch_size = int(config["batch_size"])
-        timeout = int(config["timeout"])
 
         (
             new_weights,
@@ -88,9 +86,6 @@ class SpeechBrainClient(fl.client.Client):
         ) = self.train_speech_recogniser(
             weights,
             epochs,
-            batch_size,
-            timeout,
-            delay_factor = self.delay_factor,
             global_rounds=global_rounds
         )
 
@@ -122,10 +117,7 @@ class SpeechBrainClient(fl.client.Client):
         num_examples, loss, wer = self.train_speech_recogniser(
             server_params=weights,
             epochs=1,
-            batch_size=8,
-            timeout=100000,
-            evaluate=True,
-            delay_factor=0
+            evaluate=True
         )
         torch.cuda.empty_cache()
 
@@ -138,10 +130,7 @@ class SpeechBrainClient(fl.client.Client):
         self,
         server_params,
         epochs,
-        batch_size,
-        timeout,
         evaluate=False,
-        delay_factor=0.0,
         add_train=False,
         global_rounds=None
     ):
@@ -199,6 +188,11 @@ class SpeechBrainClient(fl.client.Client):
             valid_loader_kwargs=self.params.test_dataloader_options,
         )
 
+        # exp operation to avg_loss and avg_wer
+        avg_wer = 100 if avg_wer > 100 else avg_wer
+        avg_loss = exp(- avg_loss)
+        avg_wer = exp(100 - avg_wer)
+
         # retrieve the parameters to return
         params_list = get_weights(self.modules)
 
@@ -215,7 +209,6 @@ class SpeechBrainClient(fl.client.Client):
         return (
             params_list,
             count_sample,
-            # len(train_set) * self.params.batch_size * epochs,
             len(train_set) * self.params.batch_size * epochs,
             fit_duration,
             avg_loss,
@@ -344,7 +337,7 @@ def int_model(
         overrides = {
             "output_folder": save_path,
             "number_of_epochs": 1,
-            "test_batch_size": 16,
+            "test_batch_size": 4,
             "device": eval_device,
             # "device": 'cpu'
         }
@@ -421,7 +414,6 @@ def main() -> None:
         "--log_host", type=str, help="HTTP log handler host (no default)",
     )
     parser.add_argument("--cid", type=str, help="Client CID (no default)")
-    parser.add_argument("--delay_factor", type=float, default=0.0, help="Client delay factor")
     parser.add_argument("--data_path", type=str, help="dataset path")
     parser.add_argument('--server_address', type=str, default="[::]:8080", help='server IP:PORT')
     parser.add_argument("--tr_path", type=str, help="train set path")
@@ -449,7 +441,7 @@ def main() -> None:
                                    args.config_file, args.tokenizer_path, args.eval_device)
 
     # Start client
-    client = SpeechBrainClient(args.cid, args.delay_factor, asr_brain, dataset, args.pre_train_model_path)
+    client = SpeechBrainClient(args.cid, asr_brain, dataset, args.pre_train_model_path)
 
     #client.fit( (client.get_parameters().parameters, config))
     fl.client.start_client(args.server_address, client, grpc_max_message_length=1024*1024*1024)
