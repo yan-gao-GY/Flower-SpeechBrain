@@ -33,10 +33,9 @@ from acoustic_training import (
     set_weights,
     get_weights
 )
-from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, ParametersRes, Weights
 
 
-class SpeechBrainClient(fl.client.Client):
+class SpeechBrainClient(fl.client.NumPyClient):
     def __init__(self,
         cid: int,
         asr_brain,
@@ -56,19 +55,13 @@ class SpeechBrainClient(fl.client.Client):
         fl.common.logger.log(logging.DEBUG, "Starting client %s", cid)
 
 
-    def get_parameters(self) -> ParametersRes:
+    def get_parameters(self, config):
         print(f"Client {self.cid}: get_parameters")
+        weights = get_weights(self.modules)
+        return weights
 
-        weights: Weights = get_weights(self.modules)
-        parameters = fl.common.weights_to_parameters(weights)
-        return ParametersRes(parameters=parameters)
-
-
-    def fit(self, ins: FitIns) -> FitRes:
+    def fit(self, parameters, config):
         print(f"Client {self.cid}: fit")
-
-        weights: Weights = fl.common.parameters_to_weights(ins.parameters)
-        config = ins.config
 
         # Read training configuration
         global_rounds = int(config["epoch_global"])
@@ -83,7 +76,7 @@ class SpeechBrainClient(fl.client.Client):
             avg_loss,
             avg_wer
         ) = self.train_speech_recogniser(
-            weights,
+            parameters,
             epochs,
             global_rounds=global_rounds
         )
@@ -91,39 +84,26 @@ class SpeechBrainClient(fl.client.Client):
         # np.save('pretrained_model.npy', self.new_weights, allow_pickle=True)
 
         fl.common.logger.log(logging.DEBUG, "client %s had fit_duration %s with %s of %s", self.cid, fit_duration, num_examples, num_examples_ceil)
-
         metrics = {"train_loss": avg_loss, "wer": avg_wer}
-
         torch.cuda.empty_cache()
 
-        return FitRes(
-            parameters=self.get_parameters().parameters,
-            num_examples=num_examples,
-            num_examples_ceil=num_examples_ceil,
-            fit_duration=fit_duration,
-            metrics=metrics
-        )
+        return self.get_parameters(config={}), num_examples, metrics
 
-    def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
+    def evaluate(self, parameters, config):
         print(f"Client {self.cid}: evaluate")
 
-        weights = fl.common.parameters_to_weights(ins.parameters)
-
-        # config = ins.config
         # epochs = int(config["epochs"])
         # batch_size = int(config["batch_size"])
 
         num_examples, loss, wer = self.train_speech_recogniser(
-            server_params=weights,
+            server_params=parameters,
             epochs=1,
             evaluate=True
         )
         torch.cuda.empty_cache()
 
         # Return the number of evaluation examples and the evaluation result (loss)
-        return EvaluateRes(
-            num_examples=num_examples, loss=float(loss), accuracy=float(wer)
-        )
+        return float(loss), num_examples, {"accuracy": float(wer)}
 
     def train_speech_recogniser(
         self,
@@ -443,7 +423,7 @@ def main() -> None:
     client = SpeechBrainClient(args.cid, asr_brain, dataset, args.pre_train_model_path)
 
     #client.fit( (client.get_parameters().parameters, config))
-    fl.client.start_client(args.server_address, client, grpc_max_message_length=1024*1024*1024)
+    fl.client.start_numpy_client(server_address=args.server_address, client=client)
 
 
 if __name__ == "__main__":

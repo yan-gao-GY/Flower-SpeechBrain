@@ -38,7 +38,7 @@ class Stage(Enum):
     VALID = auto()
     TEST = auto()
 
-def set_weights(weights: fl.common.Weights, modules, evaluate, add_train, device) -> None:
+def set_weights(weights, modules, evaluate, add_train, device) -> None:
     """Set model weights from a list of NumPy ndarrays."""
     state_dict = OrderedDict()
     valid_keys = [k for k in modules.state_dict().keys() if k != K1 and k != K2]
@@ -49,7 +49,7 @@ def set_weights(weights: fl.common.Weights, modules, evaluate, add_train, device
 
     modules.load_state_dict(state_dict, strict=False)
 
-def get_weights(modules) -> fl.common.Weights:
+def get_weights(modules):
     """Get model weights as a list of NumPy ndarrays."""
     w = []
     for k, v in modules.state_dict().items():

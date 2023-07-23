@@ -15,16 +15,22 @@
 
 
 from argparse import ArgumentParser
-from typing import Callable, Dict, Optional, Tuple, List
+from logging import WARNING
+from typing import Callable, Dict, List, Optional, Tuple, Union
 import torch
 import flwr as fl
 import socket
-import numpy as np
-from functools import reduce
-
 from client import SpeechBrainClient, int_model
-from flwr.server.strategy.aggregate import aggregate
-from flwr.common import parameters_to_weights, Weights, weights_to_parameters
+from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
+from flwr.common import (
+    FitRes,
+    Parameters,
+    Scalar,
+    ndarrays_to_parameters,
+    parameters_to_ndarrays,
+)
+from flwr.common.logger import log
+from flwr.server.client_proxy import ClientProxy
 
 
 parser = ArgumentParser(description="FlowerSpeechBrain")
@@ -59,39 +65,49 @@ with open('server_ip.txt', 'w') as ff:
 
 class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
     def aggregate_fit(
-        self,
-        rnd: int,
-        results: List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.FitRes]],
-        failures: List[BaseException],
-    ) -> Optional[fl.common.Weights]:
-
+            self,
+            server_round: int,
+            results: List[Tuple[ClientProxy, FitRes]],
+            failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
+    ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
+        """Aggregate fit results using weighted average."""
         if not results:
-            return None
+            return None, {}
         # Do not aggregate if there are failures and failures are not accepted
         if not self.accept_failures and failures:
-            return None
+            return None, {}
+
         # Convert results
         key_name = 'train_loss' if args.weight_strategy == 'loss' else 'wer'
         weights = None
 
         if args.weight_strategy == 'num':
             weights_results = [
-                (parameters_to_weights(fit_res.parameters), fit_res.num_examples)
-                for client, fit_res in results
+                (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
+                for _, fit_res in results
             ]
             weights =  aggregate(weights_results)
         elif args.weight_strategy == 'loss' or args.weight_strategy == 'wer':
             weights_results = [
-                (parameters_to_weights(fit_res.parameters), fit_res.metrics[key_name])
+                (parameters_to_ndarrays(fit_res.parameters), fit_res.metrics[key_name])
                 for client, fit_res in results
             ]
             weights = aggregate(weights_results)
+
+        # Aggregate custom metrics if aggregation fn was provided
+        metrics_aggregated = {}
+        if self.fit_metrics_aggregation_fn:
+            fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
+            metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
+        elif server_round == 1:  # Only log this warning once
+            log(WARNING, "No fit_metrics_aggregation_fn provided")
 
         # Train model after aggregation
         if weights is not None:
             print(f"Train model after aggregation")
             save_path = args.save_path + "add_train_9999"
-            asr_brain, dataset = int_model(args.config_path, args.tr_add_path, args.tr_path, args.tr_path, save_path,
+            asr_brain, dataset = int_model(args.config_path, args.tr_add_path, args.tr_path, args.tr_path,
+                                           save_path,
                                            args.data_path, args.config_file, args.tokenizer_path, add_train=True)
             client = SpeechBrainClient(9999, asr_brain, dataset)
 
@@ -101,33 +117,28 @@ class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
                 add_train=True
             )
             torch.cuda.empty_cache()
-            return weights_to_parameters(weights_after_server_side_training), {}
+            return ndarrays_to_parameters(weights_after_server_side_training), metrics_aggregated
 
 
 def main() -> None:
-    # Create ClientManager & Strategy
-    client_manager = fl.server.SimpleClientManager()
-
+    # Create Strategy
     strategy = TrainAfterAggregateStrategy(
         fraction_fit=1,
         min_fit_clients=args.min_fit_clients,
         min_available_clients=args.min_available_clients,
-        eval_fn=evaluate,
+        evaluate_fn=evaluate,
         on_fit_config_fn=get_on_fit_config_fn()
     )
 
-
-    # Configure logger
-    fl.common.logger.configure("server", host=args.log_host)
-
-    server = fl.server.Server(client_manager=client_manager, strategy=strategy)
-
     # Run server
     fl.server.start_server(
-        args.server_address, server, config={"num_rounds": args.rounds}, grpc_max_message_length=1024*1024*1024
+        server_address=args.server_address,
+        config=fl.server.ServerConfig(num_rounds=args.rounds),
+        strategy=strategy,
     )
 
-def evaluate(weights: fl.common.Weights):
+
+def evaluate(server_round, weights, metrics):
     """Use entire test set for evaluation."""
     data_path = args.data_path
     flower_path = args.config_path
