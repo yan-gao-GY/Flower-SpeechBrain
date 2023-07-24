@@ -69,7 +69,8 @@ class ASR(sb.core.Brain):
 
         # Forward pass
         feats = self.hparams.compute_features(wavs)
-        feats = self.modules.normalize(feats, wav_lens)
+        feats = self.modules.normalize(feats.cpu(), wav_lens)
+        feats = feats.to(self.device)
 
         ## Add augmentation if specified
         if stage == sb.Stage.TRAIN:
@@ -421,3 +422,4 @@ class ASR(sb.core.Brain):
         self.step = 0
 
         return batch_count, avg_test_loss, wer
+
