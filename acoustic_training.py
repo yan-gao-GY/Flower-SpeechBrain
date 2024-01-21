@@ -86,7 +86,7 @@ class ASR(sb.core.Brain):
 
         # Compute outputs
         if stage == sb.Stage.TRAIN:
-            p_tokens_gr, scores = self.hparams.greedy_searcher(x, wav_lens)
+            p_tokens_gr, _, _, _ = self.hparams.greedy_searcher(x, wav_lens)
             current_epoch = self.hparams.epoch_counter.current
             if current_epoch <= self.hparams.number_of_ctc_epochs:
                 # Output layer for ctc log-probabilities
