@@ -350,7 +350,7 @@ class ASR(sb.core.Brain):
     def on_fit_start(self):
         # Run this *after* starting all processes since jit modules cannot be
         # pickled.
-        self._compile_jit()
+        self._compile()
 
         # Wrap modules with parallel backend after jit
         self._wrap_distributed()
@@ -359,10 +359,8 @@ class ASR(sb.core.Brain):
         self.init_optimizers()
 
         # Load latest checkpoint to resume training if interrupted
-        if self.checkpointer is not None:
-            self.checkpointer.recover_if_possible(
-                device=torch.device(self.device)
-            )
+	if self.checkpointer is not None:
+            self.checkpointer.recover_if_possible()
 
     def evaluate(
         self,
