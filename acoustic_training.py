@@ -96,7 +96,7 @@ class ASR(sb.core.Brain):
             else:
                 return p_seq, wav_lens, p_tokens_gr
         else:
-            p_tokens, scores = self.hparams.beam_searcher(x, wav_lens)
+            p_tokens, _, _, _ = self.hparams.beam_searcher(x, wav_lens)
             return p_seq, wav_lens, p_tokens
 
     def fit(
