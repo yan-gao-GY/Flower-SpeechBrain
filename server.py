@@ -86,7 +86,7 @@ class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
                 (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
                 for _, fit_res in results
             ]
-            weights =  aggregate(weights_results)
+            weights = aggregate(weights_results)
         elif args.weight_strategy == 'loss' or args.weight_strategy == 'wer':
             weights_results = [
                 (parameters_to_ndarrays(fit_res.parameters), fit_res.metrics[key_name])
@@ -105,11 +105,11 @@ class TrainAfterAggregateStrategy(fl.server.strategy.FedAvg):
         # Train model after aggregation
         if weights is not None:
             print(f"Train model after aggregation")
-            save_path = args.save_path + "add_train_9999"
+            save_path = args.save_path + "add_train"
             asr_brain, dataset = int_model(args.config_path, args.tr_add_path, args.tr_path, args.tr_path,
                                            save_path,
                                            args.data_path, args.config_file, args.tokenizer_path, add_train=True)
-            client = SpeechBrainClient(9999, asr_brain, dataset)
+            client = SpeechBrainClient(None, asr_brain, dataset)
 
             weights_after_server_side_training = client.train_speech_recogniser(
                 server_params=weights,
@@ -145,12 +145,12 @@ def evaluate(server_round, weights, metrics):
     tr_path = args.tr_path
     dev_path = tr_path
     test_path = args.test_path
-    save_path = args.save_path + "evaluation_19999"
+    save_path = args.save_path + "evaluation"
 
     # int model
     asr_brain, dataset = int_model(flower_path, tr_path, dev_path, test_path, save_path, data_path, args.config_file, args.tokenizer_path, evaluate=True)
 
-    client = SpeechBrainClient(19999, asr_brain, dataset)
+    client = SpeechBrainClient(None, asr_brain, dataset)
 
     nb_ex, lss, acc = client.train_speech_recogniser(
         server_params=weights,

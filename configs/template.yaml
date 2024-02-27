@@ -1,14 +1,15 @@
 # ################################
 # Model: VGG2 + LSTM + time pooling
-# Augmentation: TimeDomainSpecAugment
-# Additions: 2D pooling
+# Augmentation: SpecAugment
+# Authors: Titouan Parcollet, Mirco Ravanelli, Peter Plantinga, Ju-Chieh Chou,
+# and Abdel HEBA 2020
 # ################################
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
 seed: 1234
 __set_seed: !!python/object/apply:torch.manual_seed [!ref <seed>]
 output_folder: !ref results/CRDNN_it/<seed>
-wer_file: !ref <output_folder>/wer.txt
+test_wer_file: !ref <output_folder>/wer_test.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
 
@@ -26,6 +27,8 @@ tokenizer_csv: /placeholder
 device: cuda:0
 # device: cpu
 
+skip_prep: False # Skip data preparation
+
 # We remove utterance slonger than 8s in the train/dev/test sets as
 # longer sentences certainly correspond to "open microphones".
 avoid_if_longer_than: 8.0
@@ -36,6 +39,9 @@ number_of_ctc_epochs: 2
 lr: 1.0
 ctc_weight: 0.3
 sorting: ascending
+
+precision: fp32 # bf16, fp16 or fp32
+
 
 # With data_parallel batch_size is split into N jobs
 # With DDP batch_size is multiplied by N jobs
@@ -50,16 +56,19 @@ test_dataloader_options:
     batch_size: !ref <test_batch_size>
     num_workers: 0
 
+
 # BPE parameters
 token_type: unigram  # ["unigram", "bpe", "char"]
 character_coverage: 1.0
+label_smoothing: 0.0
+
 
 # Feature parameters (FBANKS etc)
 sample_rate: 16000
 n_fft: 400
 n_mels: 80
 
-# Model parameters
+####################### Model Parameters #######################################
 activation: !name:torch.nn.LeakyReLU
 dropout: 0.15
 cnn_blocks: 1
@@ -76,6 +85,11 @@ dnn_neurons: 512
 emb_size: 128
 dec_neurons: 512
 
+dec_hidden_size: !ref <dec_neurons>
+dec_attn_dim: !ref <dec_neurons>
+
+
+
 # Outputs
 output_neurons: 250  # BPE size, index(blank/eos/bos) = 0
 
@@ -90,8 +104,9 @@ beam_size: 80
 eos_threshold: 1.5
 using_max_attn_shift: True
 max_attn_shift: 140
-ctc_weight_decode: 0.0
+# ctc_weight_decode: 0.0
 temperature: 1.50
+
 
 #
 # Functions and classes
@@ -99,50 +114,25 @@ temperature: 1.50
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
     limit: !ref <number_of_epochs>
 
-# Time Drop
-time_drop_length_low: 15  # Min length for temporal chunk to drop in spectrogram
-time_drop_length_high: 25  # Max length for temporal chunk to drop in spectrogram
-time_drop_count_low: 5  # Min number of chunks to drop in time in the spectrogram
-time_drop_count_high: 5  # Max number of chunks to drop in time in the spectrogram
-time_drop_replace: "zeros"  # Method of dropping chunks
-
+ # Time Drop
 time_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
-    drop_length_low: !ref <time_drop_length_low>
-    drop_length_high: !ref <time_drop_length_high>
-    drop_count_low: !ref <time_drop_count_low>
-    drop_count_high: !ref <time_drop_count_high>
-    replace: !ref <time_drop_replace>
-    dim: 1
+    drop_length_low: 15
+    drop_length_high: 25
+    drop_count_low: 5
+    drop_count_high: 5
 
 # Frequency Drop
-freq_drop_length_low: 25  # Min length for chunks to drop in frequency in the spectrogram
-freq_drop_length_high: 35  # Max length for chunks to drop in frequency in the spectrogram
-freq_drop_count_low: 2  # Min number of chunks to drop in frequency in the spectrogram
-freq_drop_count_high: 2  # Max number of chunks to drop in frequency in the spectrogram
-freq_drop_replace: "zeros"  # Method of dropping chunks
-
 freq_drop: !new:speechbrain.augment.freq_domain.SpectrogramDrop
-    drop_length_low: !ref <freq_drop_length_low>
-    drop_length_high: !ref <freq_drop_length_high>
-    drop_count_low: !ref <freq_drop_count_low>
-    drop_count_high: !ref <freq_drop_count_high>
-    replace: !ref <freq_drop_replace>
+    drop_length_low: 25
+    drop_length_high: 35
+    drop_count_low: 2
+    drop_count_high: 2
     dim: 2
 
 # Time warp
-time_warp_window: 5  # Length of time warping window
-time_warp_mode: "bicubic"  # Time warping method
-
 time_warp: !new:speechbrain.augment.freq_domain.Warping
-    warp_window: !ref <time_warp_window>
-    warp_mode: !ref <time_warp_mode>
-    dim: 1
 
 fea_augment: !new:speechbrain.augment.augmenter.Augmenter
-    parallel_augment: False
-    concat_original: False
-    repeat_augment: 1
-    shuffle_augmentations: False
     min_augmentations: 3
     max_augmentations: 3
     augment_prob: 1.0
@@ -158,6 +148,9 @@ compute_features: !new:speechbrain.lobes.features.Fbank
     sample_rate: !ref <sample_rate>
     n_fft: !ref <n_fft>
     n_mels: !ref <n_mels>
+
+
+############################## Models ##########################################
 
 enc: !new:speechbrain.lobes.models.CRDNN.CRDNN
     input_shape: [null, null, !ref <n_mels>]
@@ -183,12 +176,12 @@ emb: !new:speechbrain.nnet.embedding.Embedding
     embedding_dim: !ref <emb_size>
 
 dec: !new:speechbrain.nnet.RNN.AttentionalRNNDecoder
-    enc_dim: !ref <dnn_neurons>
+    enc_dim: !ref <dec_neurons>
     input_size: !ref <emb_size>
     rnn_type: gru
     attn_type: location
-    hidden_size: 512
-    attn_dim: 512
+    hidden_size: !ref <dec_hidden_size>
+    attn_dim: !ref <dec_attn_dim>
     num_layers: 1
     scaling: 1.0
     channels: 10
@@ -211,7 +204,7 @@ ctc_cost: !name:speechbrain.nnet.losses.ctc_loss
     blank_index: !ref <blank_index>
 
 seq_cost: !name:speechbrain.nnet.losses.nll_loss
-    label_smoothing: 0.1
+    label_smoothing: !ref <label_smoothing>
 
 modules:
     enc: !ref <enc>
@@ -232,15 +225,6 @@ lr_annealing: !new:speechbrain.nnet.schedulers.NewBobScheduler
     improvement_threshold: 0.0025
     annealing_factor: 0.8
     patient: 0
-
-greedy_searcher: !new:speechbrain.decoders.seq2seq.S2SRNNGreedySearcher
-    embedding: !ref <emb>
-    decoder: !ref <dec>
-    linear: !ref <seq_lin>
-    bos_index: !ref <bos_index>
-    eos_index: !ref <eos_index>
-    min_decode_ratio: !ref <min_decode_ratio>
-    max_decode_ratio: !ref <max_decode_ratio>
 
 beam_searcher: !new:speechbrain.decoders.S2SRNNBeamSearcher
     embedding: !ref <emb>

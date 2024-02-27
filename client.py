@@ -52,8 +52,6 @@ class SpeechBrainClient(fl.client.NumPyClient):
         # self.new_weights = [ nda for nda in np.load(
         #     self.data_path + "/flower/pretrained_model.npy", allow_pickle=True
         # )]
-        fl.common.logger.log(logging.DEBUG, "Starting client %s", cid)
-
 
     def get_parameters(self, config):
         print(f"Client {self.cid}: get_parameters")
@@ -82,8 +80,6 @@ class SpeechBrainClient(fl.client.NumPyClient):
         )
 
         # np.save('pretrained_model.npy', self.new_weights, allow_pickle=True)
-
-        fl.common.logger.log(logging.DEBUG, "client %s had fit_duration %s with %s of %s", self.cid, fit_duration, num_examples, num_examples_ceil)
         metrics = {"train_loss": avg_loss, "wer": avg_wer}
         torch.cuda.empty_cache()
 
@@ -148,7 +144,7 @@ class SpeechBrainClient(fl.client.NumPyClient):
 
         # Load best checkpoint for evaluation
         if evaluate:
-            self.params.wer_file = self.params.output_folder + "/wer_test.txt"
+            self.params.test_wer_file = self.params.output_folder + "/wer_test.txt"
             batch_count, loss, wer = self.asr_brain.evaluate(
                 test_data,
                 # min_key="WER",
@@ -195,7 +191,7 @@ class SpeechBrainClient(fl.client.NumPyClient):
         )
 
 # Define custom data procedure
-def dataio_prepare(hparams):
+def dataio_prepare(hparams, tokenizer):
     """This function prepares the datasets to be used in the brain class.
     It also defines the data processing pipeline through user-defined functions."""
 
@@ -247,16 +243,6 @@ def dataio_prepare(hparams):
 
     datasets = [train_data, valid_data, test_data]
 
-    # defining tokenizer and loading it
-    tokenizer = SentencePiece(
-        model_dir=hparams["save_folder"],
-        vocab_size=hparams["output_neurons"],
-        annotation_train=hparams["tokenizer_csv"],
-        annotation_read="wrd",
-        model_type=hparams["token_type"],
-        character_coverage=hparams["character_coverage"],
-    )
-
     # 2. Define audio pipeline:
     @sb.utils.data_pipeline.takes("wav")
     @sb.utils.data_pipeline.provides("sig")
@@ -293,7 +279,8 @@ def dataio_prepare(hparams):
     sb.dataio.dataset.set_output_keys(
         datasets, ["id", "sig", "tokens_bos", "tokens_eos", "tokens"],
     )
-    return train_data, valid_data, test_data, tokenizer
+    return train_data, valid_data, test_data
+
 
 def int_model(
     flower_path,
@@ -369,8 +356,18 @@ def int_model(
         },
     )
 
+    # Defining tokenizer and loading it
+    tokenizer = SentencePiece(
+        model_dir=params["save_folder"],
+        vocab_size=params["output_neurons"],
+        annotation_train=params["train_csv"],
+        annotation_read="wrd",
+        model_type=params["token_type"],
+        character_coverage=params["character_coverage"],
+    )
+
     # Create the datasets objects as well as tokenization and encoding :-D
-    train_data, valid_data, test_data, tokenizer = dataio_prepare(params)
+    train_data, valid_data, test_data = dataio_prepare(params, tokenizer)
 
     # Trainer initialization
     asr_brain = ASR(
@@ -402,7 +399,7 @@ def main() -> None:
     parser.add_argument('--tokenizer_path', type=str, default=None,
                         help='path for tokenizer (generated from the data for pre-trained model)')
     parser.add_argument('--config_path', type=str, default="./configs/", help='path to config directory')
-    parser.add_argument('--config_file', type=str, default="CRDNN.yaml", help='config file name')
+    parser.add_argument('--config_file', type=str, default="template.yaml", help='config file name')
     parser.add_argument('--eval_device', type=str, default="cuda:0", help='device for evaluation')
     args = parser.parse_args()
 
@@ -423,7 +420,10 @@ def main() -> None:
     client = SpeechBrainClient(args.cid, asr_brain, dataset, args.pre_train_model_path)
 
     #client.fit( (client.get_parameters().parameters, config))
-    fl.client.start_numpy_client(server_address=args.server_address, client=client)
+    fl.client.start_client(
+        server_address=args.server_address,
+        client=client.to_client(),
+    )
 
 
 if __name__ == "__main__":
